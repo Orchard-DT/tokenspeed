@@ -2141,12 +2141,12 @@ class ModelExecutor:
     ) -> None:
         """Allocate the dense per-vocab draft q under --enable-speculative-sampling.
 
-        Trees keep their draft q per tree instead (bind_tree), and DFLASH
-        (DFlash2) records a sparse q over its selector's candidates
+        Trees keep their draft q per tree instead (bind_tree), and DFlash2
+        records a sparse q over its selector's candidates
         (RuntimeStates.future_draft_q, allocated by its bind_sampling_backend).
-        The step drafters and DSpark sample from full-vocab logits and need
-        the dense rows: whole-vocabulary rows, or this rank's columns when
-        the verifier reads q per shard and the drafter can record them
+        The step drafters, DSpark and base DFLASH sample from full-vocab logits
+        and need the dense rows: whole-vocabulary rows, or this rank's columns
+        when the verifier reads q per shard and the drafter can record them
         (``_draft_probs_shard``).
         """
         if not config.enable_speculative_sampling or config.spec_draft_tree:
@@ -2156,7 +2156,11 @@ class ModelExecutor:
                 "enable_speculative_sampling needs a speculative drafter to "
                 "record proposal distributions for"
             )
-        if config.spec_algo != "DFLASH":
+        # DFlash2 records a sparse q instead. A stage without a drafter (a
+        # pipeline stage before the last) keeps the old rule: no rows for DFLASH.
+        if config.spec_algo != "DFLASH" or (
+            self.drafter is not None and not self.drafter.records_sparse_draft_q
+        ):
             self.runtime_states.init_draft_probs(
                 spec_num_tokens=spec_num_tokens,
                 reject_threshold=config.spec_reject_draft_prob_threshold,

@@ -120,6 +120,10 @@ class BaseDrafter:
     # Other block drafters propose a whole block greedily and leave this False.
     supports_speculative_sampling = False
 
+    # Whether the recorded q is DFlash2's sparse ``RuntimeStates.future_draft_q``
+    # instead of the dense ``RuntimeStates.draft_probs`` rows.
+    records_sparse_draft_q = False
+
     # Whether every sampled proposal comes from ``sample_draft_step`` over the
     # draft model's own head, which can then hand it this rank's vocabulary
     # shard (``keep_draft_logits_vocab_sharded``).

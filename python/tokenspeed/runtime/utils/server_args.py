@@ -81,7 +81,9 @@ logger = get_colorful_logger(__name__)
 # either.
 SPECULATIVE_SAMPLING_BACKENDS = frozenset({"flashinfer", "flashinfer_full", "sonic"})
 # The one backend whose verify reads the DFlash2 candidate selector's sparse
-# draft q (RuntimeStates.future_draft_q): DFLASH under the flag needs it.
+# draft q (RuntimeStates.future_draft_q): a DFlash2 draft needs it. A base DFLASH
+# draft records the dense q and takes SPECULATIVE_SAMPLING_BACKENDS; DFlash.
+# bind_sampling_backend checks the pairing once the draft is loaded.
 DFLASH_SPECULATIVE_SAMPLING_BACKEND = "triton"
 
 # Usable range of --spec-reject-draft-prob-threshold. The sentinel rows are
@@ -2100,12 +2102,10 @@ class ServerArgs:
         the verifier must be a backend that runs the draft-prob chain kernel:
         ``greedy`` verifies by exact match, so a dense q never enters it, and
         ``triton`` by a target-sampled exact match unless it runs block
-        verification, which reads the dense q. The one block drafter
-        served is DFLASH with the DFlash2 candidate selector: its walk samples
-        each step from the selector's q over its top-K candidates, which only
-        the ``triton`` backend verifies (sparse q); base DFLASH without the
-        selector is refused when the drafter binds the verifier, since only
-        the loaded checkpoint tells the two apart. The prefill role of a
+        verification, which reads the dense q. DFLASH is admitted with either
+        ``triton`` (a DFlash2 draft's sparse q) or a draft-prob backend (a base
+        draft's dense q); only the loaded checkpoint says which, so the drafter
+        refuses the wrong pairing when it binds the verifier. The prefill role of a
         disaggregated deployment never verifies a chain of its own and its
         drafted candidates ship to the decode node without q, so there the
         flag would only allocate the per-slot distribution buffer; it is
@@ -2125,12 +2125,11 @@ class ServerArgs:
         if self.speculative_algorithm is None:
             raise ValueError(
                 "--enable-speculative-sampling needs speculative decoding: pass "
-                "--speculative-algorithm EAGLE3 or MTP, or DFLASH with a DFlash2 "
-                "draft and --sampling-backend triton"
+                "--speculative-algorithm EAGLE3, MTP or DFLASH"
             )
-        # DFLASH samples its walk only with the DFlash2 candidate selector
-        # (the verifier is checked below); DSpark samples its Markov steps only
-        # for block verification or for synthetic rejection over sampled drafts.
+        # DFLASH samples its block (base draft) or its walk (DFlash2); the
+        # verifier is checked below. DSpark samples its Markov steps only for
+        # block verification or for synthetic rejection over sampled drafts.
         if self.speculative_algorithm in BLOCK_SPEC_ALGORITHMS and not (
             self.speculative_algorithm == "DFLASH"
             or (
@@ -2156,12 +2155,15 @@ class ServerArgs:
                 f"{self.speculative_eagle_topk=}"
             )
         if self.speculative_algorithm == "DFLASH":
-            if self.sampling_backend != DFLASH_SPECULATIVE_SAMPLING_BACKEND:
+            if (
+                self.sampling_backend != DFLASH_SPECULATIVE_SAMPLING_BACKEND
+                and self.sampling_backend not in SPECULATIVE_SAMPLING_BACKENDS
+            ):
                 raise ValueError(
-                    "--enable-speculative-sampling with DFLASH needs --sampling-backend "
-                    f"{DFLASH_SPECULATIVE_SAMPLING_BACKEND}, the one verifier that reads "
-                    "the DFlash2 selector's sparse draft distribution; got "
-                    f"--sampling-backend {self.sampling_backend}"
+                    "--enable-speculative-sampling with DFLASH needs "
+                    f"--sampling-backend {DFLASH_SPECULATIVE_SAMPLING_BACKEND} "
+                    f"(DFlash2) or one of {sorted(SPECULATIVE_SAMPLING_BACKENDS)} "
+                    f"(base draft); got --sampling-backend {self.sampling_backend}"
                 )
         elif (
             self.sampling_backend not in SPECULATIVE_SAMPLING_BACKENDS
